@@ -29,10 +29,13 @@ class DustLogger:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
     
-    def save_log(self, data,count):
+    def save_log(self, data, count):
         """ Save log with dynamic location """
         # Set up logger only when save_log is called
         self.setup_logger(data['location'])
         data['count'] = count
         # Log data
         self.logger.info(json.dumps(data, ensure_ascii=False))
+        
+
+    

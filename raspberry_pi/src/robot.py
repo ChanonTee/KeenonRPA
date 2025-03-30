@@ -7,7 +7,6 @@ class Robot:
     def __init__(self):
         self.server_ip = CONFIG["RPA_IP"]
         self.server_port = CONFIG["RPA_PORT"]
-        self.server_thread = None
         self.server_socket = None
         self.client_socket = None
 
@@ -70,9 +69,12 @@ class Robot:
           
     # Check ui in screen
     def is_have_ui(self, ui: str) -> bool:
+        full_ui = None
         full_ui = self.send_command("getFullUI")
         time.sleep(1)
-        pattern = rf'Text: {re.escape(ui)},'
+        if full_ui is None:
+            return False
+        pattern = rf'Text: {re.escape(ui)},' 
         return re.search(pattern, full_ui) is not None
     
     # Try to search ui in screen with scroll
