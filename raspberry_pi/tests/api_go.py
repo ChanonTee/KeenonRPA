@@ -1,7 +1,10 @@
-from src import CONFIG, Database, Robot, Sensor
+from src import Database, Robot, Sensor
 import time
 import random
+from dotenv import load_dotenv
+import os
 
+load_dotenv()
 # class Sensor:
     
 #     @staticmethod
@@ -26,13 +29,13 @@ import random
 # Go
 # เมื่อไปถึงจะกลับมามีปุ่ม Go
         
-def main(): 
+if __name__ == "__main__":
     robot = Robot()
     sensor = Sensor()
     db = Database()
     
-    max_retries = CONFIG["MAX_RETRIES"]
-    ucl_limit = CONFIG["UCL_LIMIT"]
+    max_retries = int(os.getenv("MAX_RETRIES", 3)) # maximum number of retries
+    ucl_limit =  int(os.getenv("UCL_LIMIT", 100)) # upper control limit
     
     offline_measurements = []  # เก็บค่าฝุ่นเมื่อ DB เชื่อมต่อไม่ได้
 
@@ -106,6 +109,3 @@ def main():
                 print(f"Still unable to save {point}: {e}")
     
     print("All measurements completed.")
-
-if __name__ == "__main__":
-    main()

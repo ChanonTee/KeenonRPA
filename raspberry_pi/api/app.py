@@ -1,10 +1,16 @@
+from src import Robot, Sensor, Database
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from src import Robot, Sensor, Database, CONFIG
+from typing import List
+from dotenv import load_dotenv
 import threading
 import time
-from typing import List
+import os
 
+
+# Load configuration from .env file
+load_dotenv()
 
 """
 Start API server with this command:
@@ -23,50 +29,116 @@ robot.start_server()
 
 # List to store destination points
 points = []
-data_buffer = []
-ucl_limit = CONFIG['UCL_LIMIT']
-max_retries = CONFIG['MAX_RETRIES'] 
+dust_data_buffer = []
+ucl_limit = os.getenv("UCL_LIMIT")
+max_retries = os.getenv("MAX_RETRIES", 3) 
+max_wait = os.getenv("MAX_WAIT", 120)
 
+# Thread
 stop_event = threading.Event()
+lock = threading.Lock()
 robot_thread = None  # Store the robot's thread
 
 class PointRequest(BaseModel):
     point: str  # Define a request model for receiving destination points
 
-@app.post("/send-point")
-async def send_point(data: PointRequest):
-    """Add a destination point to the queue."""
+@app.post("/add-point")
+async def add_point(data: PointRequest):
+    """
+    Add a single destination point to the robot's queue.
+
+    This endpoint allows a user to add one destination point to the queue. 
+    The robot will later visit these points and perform measurements.
+
+    **Request body**:
+    - **points**: A list of destination points to be added. Example: 
+    {
+        "point": 6002-IS-1K017-default
+    }
+    **Response**:
+    - A message indicating the point that were added and The current list of destination points.
+    """
     point = data.point
     points.append(point)
     print(f"Added {point} to the queue.")
-    return {"message": points}
+    return JSONResponse(
+                content={"message": f"Added {point} to the queue.", "points": points},
+                status_code=200 
+            )
 
 class ListPointsRequest(BaseModel):
-    points: List[str]  # รับหลายจุดในรูปแบบของ list
+    points: List[str]  # Define a request model for receiving multiple destination points
 
-@app.post("/send-points")
-async def send_points(data: ListPointsRequest):
-    """Add list of destination points to the queue"""
-    points.extend(data.points)  # เพิ่มหลายจุดเข้าไปใน list
+@app.post("/add-points")
+async def add_points(data: ListPointsRequest):
+    """
+    Add a list of destination points to the robot's queue.
+
+    This endpoint allows a user to add multiple destination points at once. 
+    The robot will visit these points and perform measurements.
+
+    **Request body**:
+    - **points**: A list of destination points to be added. Example: 
+    {
+        "points": [
+           "6002-IS-1K017-default",
+           "6002-IS-1K018-default",
+           "6002-IS-1K019-default"
+        ]
+    }
+
+    **Response**:
+    - A message indicating the points that were added and The current list of destination points.
+    """
+    points.extend(data.points) 
     print(f"Added {data.points} to the queue.")
-    return {"message": points}
+    return JSONResponse(
+                content={"message": f"Added {data.points} to the queue.", "points": points},
+                status_code=200 
+            )
 
 @app.get("/get-points")
 async def get_points():
-    """Return the remaining destination points in queue."""
+    """
+    Get the remaining destination points in the queue.
+
+    This endpoint allows the user to see the points left in the queue for the robot to visit.
+
+    **Response**: The current list of destination points.
+    """
     print(f"Get points {points}")
-    return {"points": points if points else None}
+    return JSONResponse(
+                content={"points": points if points else None},
+                status_code=200 
+            )
 
 @app.get("/del-points")
 async def del_points():
-    """Delete all destination points in queue."""
+    """
+    Delete all destination points in the queue.
+
+    This endpoint clears the queue of all stored destination points.
+
+    **Response**: A message indicating the queue has been cleared.
+    """
     points.clear()
     print("Delete all points")
-    return {"message": "Delete all points"}
+    
+    return JSONResponse(
+                content={"message": "Delete all points"},
+                status_code=200 
+            )
 
 def go_task():
-    """Task for walking (Run in Thread)"""
-    global stop_event, points, data_buffer
+    """
+    Task to move the robot through all points in the queue and perform measurements.
+
+    This function will:
+    - Move the robot to each point in the queue.
+    - Perform a dust level measurement at each point.
+    - Retry the measurement if the dust level exceeds the UCL (User Control Limit).
+    """
+    global stop_event, points, dust_data_buffer
 
     if not points:
         print("No points to go.")
@@ -80,37 +152,41 @@ def go_task():
             print("Interrupted: Stopping robot process...")
             return
 
-        
-        point = points.pop(0)  # Run in queue manner
+        point = points.pop(0)  # Run in queue FIFO
         robot.send_command("clickBackButton")
         robot.send_command("Direct")
+        
         if not robot.search_ui_and_click(point):
             continue
+        
         robot.send_command("Go")
         time.sleep(1)
 
-        sec = 0
-        max_wait = 120
+        now_sec = 0
         while not robot.is_have_ui("Go"):
+            
             if stop_event.is_set():
                 print("Interrupted: Stopping robot process")
                 return
+            
             time.sleep(1)
-            sec += 1
-            print(f"Waiting {sec}/{max_wait}")
-            if sec >= max_wait:
+            now_sec += 1
+            print(f"Waiting {now_sec}/{max_wait}")
+            
+            if now_sec >= max_wait:
                 print("Timeout")
                 break
+            
         print(f"Robot at point: {point}")
-        
+
         count = 1
         dust_level = None
         while count < max_retries + 1:
             print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
 
             sensor.start_measurement()
-            dust_level = sensor.read_data()
-            
+            dust_data = sensor.read_data()
+
             if dust_level is None:
                 print(f"Measurement failed at {point}. Retrying...")
             elif dust_level <= ucl_limit:
@@ -118,45 +194,89 @@ def go_task():
                 break  
             else:
                 print(f"Dust level at {point} exceeded UCL ({dust_level}). Retrying {count}/{max_retries}...")
-            
+
             try:
-                db.save_measurement(point, dust_level, count)
+                db.save_measurement(dust_data)
                 print(f"Saved measurement at {point}: {dust_level}: {count}")
             except Exception as e:
                 print(f"Database error: {e}. Storing offline.")
-                data_buffer.append((point, dust_level, count))
-                
+                dust_data_buffer.append(dust_data)
+
             count += 1
             time.sleep(2)
-        
+
         print(f"Finished point: {point}")
-        
-    if data_buffer:
+
+    if dust_data_buffer:
         print("Retrying to save measurements...")
-        for point, dust_level in data_buffer:
+        for dust_data in dust_data_buffer:
             try:
-                db.save_measurement(point, dust_level, count)
-                print(f"Recovered and saved {point}: {dust_level}: {count}")
-                data_buffer.remove((point, dust_level, count)) 
+                db.save_measurement(dust_data)
+                print(f"Recovered and saved {dust_data.point}: {dust_data.dust_level}: {dust_data.count}")
+                dust_data_buffer.remove(dust_data)
             except Exception as e:
                 print(f"Still unable to save {point}: {e}")
-    
+
     print("All measurements completed.")
 
 @app.get("/go")
 async def go():
-    """Go to all points in queue"""
+    """
+    Start the robot process to go through all points in the queue.
+
+    This endpoint starts the robot's task of going to all destination points in the queue 
+    and performing measurements at each point.
+
+    **Response**: A message indicating the robot process has started.
+    """
     global robot_thread, stop_event
+    
+    # If the robot is already working
+    with lock: 
+        if robot_thread is not None and robot_thread.is_alive():
+            return JSONResponse(
+                content={"message": "Robot process is already running."},
+                status_code=400 # Return a 400 Bad Request if already running
+            )
+        
     stop_event.clear()
+    robot_thread = threading.Thread(target=go_task, daemon=True)
+    robot_thread.start()
 
-    if robot_thread is None or not robot_thread.is_alive():
-        robot_thread = threading.Thread(target=go_task, daemon=True)
-        robot_thread.start()
+    return JSONResponse(
+                content={"message": "Robot process started."},
+                status_code=200 
+            )
 
-    return {"message": "Robot process started."}
 
 @app.get("/stop")
 async def stop():
-    """Stop the robot process."""
+    """
+    Stop the robot process.
+
+    This endpoint stops the robot from continuing its tasks. The task will stop at the current point.
+    If the robot process hasn't started, it will return a message indicating no active process.
+    
+    **Response**: A message indicating the robot process is being stopped or that no process is running.
+    """
+    global robot_thread, stop_event
+
+    # Stop the sensor measurement if it's running
+    if sensor.is_measuring:
+        sensor.stop_measurement()
+        print("Sensor measurement stopped.")
+
+    # Check if the robot process has already started
+    with lock: 
+        if robot_thread is None or not robot_thread.is_alive():
+            return JSONResponse(
+                content={"message": "No active robot process to stop."},
+                status_code=400 # Return a 400 Bad Request if not running
+            )
+
+    # If the robot process is running, stop it
     stop_event.set()
-    return {"message": "Stopping robot process..."}
+    return JSONResponse(
+                content={"message": "Stopping robot process..."},
+                status_code=200 
+            )

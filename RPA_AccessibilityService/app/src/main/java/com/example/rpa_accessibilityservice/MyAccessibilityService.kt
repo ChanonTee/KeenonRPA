@@ -96,20 +96,6 @@ class MyAccessibilityService : AccessibilityService() {
             }
 
             when (command) {
-                command.startsWith("tap:").toString() -> {
-                    val coordinates = command.removePrefix("tap:").split(",")
-                    if (coordinates.size == 2) {
-                        val x = coordinates[0].toIntOrNull()
-                        val y = coordinates[1].toIntOrNull()
-                        if (x != null && y != null) {
-                            performTap(x, y) // Perform the tap
-                        } else {
-                            sendResponse("Invalid coordinates: $command")
-                        }
-                    } else {
-                        sendResponse("Invalid tap command format: $command")
-                    }
-                }
                 "goHome", "goBack", "showRecents" -> performGlobalActionByCommand(command)
                 "scrollUp", "scrollDown" -> performScroll(rootNode, command)
 
@@ -362,23 +348,6 @@ class MyAccessibilityService : AccessibilityService() {
             }
         } catch (e: Exception) {
             sendResponse("Error executing scroll: ${e.message}")
-        }
-    }
-
-
-    private fun performTap(x: Int, y: Int) {
-        try {
-            val command = "input tap $x $y"
-            val process = Runtime.getRuntime().exec(command)
-            process.waitFor()
-
-            if (process.exitValue() == 0) {
-                sendResponse("Tap gesture completed at x=$x, y=$y")
-            } else {
-                sendResponse("Tap gesture failed with exit code: ${process.exitValue()}")
-            }
-        } catch (e: Exception) {
-            sendResponse("Error executing tap command: ${e.message}")
         }
     }
 

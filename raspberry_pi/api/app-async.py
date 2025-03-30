@@ -6,6 +6,7 @@ import threading
 from typing import List
 
 """
+๋Just in case if app.py does not work.
 Start API server with this command:
 python -m uvicorn api.app-async:app --host 0.0.0.0 --port 8000
 python -m uvicorn api.app-async:app --host 0.0.0.0 --port 8000 --log-level debug --reload
@@ -119,7 +120,7 @@ async def go_task():
             if check_stop(): return  
             print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
 
-            sensor.start_measurement()
+            await asyncio.to_thread(sensor.start_measurement())
             dust_level = sensor.read_data()
 
             if dust_level is None:
