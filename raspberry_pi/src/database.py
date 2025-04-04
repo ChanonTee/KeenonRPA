@@ -30,8 +30,7 @@ class Database:
     def save_measurement(self, data):
         # Insert measurement data into the DustMeasurements table
         try:
-            if not self.cursor:
-                self.__connect()
+            self.__connect()
 
             query = """
                 INSERT INTO DustMeasurements 

@@ -1,4 +1,4 @@
-from src import Robot, Sensor, Database
+from src import Robot, Sensor, Database, DustLogger
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
@@ -23,6 +23,7 @@ app = FastAPI()
 robot = Robot()
 sensor = Sensor()
 db = Database()
+Logging = DustLogger()
 
 # Start the robot server
 robot.start_server()
@@ -30,9 +31,9 @@ robot.start_server()
 # List to store destination points
 points = []
 dust_data_buffer = []
-ucl_limit = os.getenv("UCL_LIMIT")
-max_retries = os.getenv("MAX_RETRIES", 3) 
-max_wait = os.getenv("MAX_WAIT", 120)
+ucl_limit = int(os.getenv("UCL_LIMIT"))
+max_retries = int(os.getenv("MAX_RETRIES", 3))
+max_wait = int(os.getenv("MAX_WAIT", 120))
 
 # Thread
 stop_event = threading.Event()
@@ -145,7 +146,10 @@ def go_task():
         return
 
     robot.send_command("goHome")
-    robot.send_command("Peanut")
+    time.sleep(1)
+    robot.send_command("Peanut Food Delivery")
+    time.sleep(3)
+
 
     while points:
         if stop_event.is_set():
@@ -157,7 +161,12 @@ def go_task():
         robot.send_command("Direct")
         
         if not robot.search_ui_and_click(point):
+            print(f"No point found skip {point}")
             continue
+        
+        if stop_event.is_set():
+            print("Interrupted: Stopping robot process...")
+            return
         
         robot.send_command("Go")
         time.sleep(1)
@@ -180,27 +189,54 @@ def go_task():
         print(f"Robot at point: {point}")
 
         count = 1
-        dust_level = None
+        um01 = None
         while count < max_retries + 1:
             print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
+            dust_data = {}
 
             sensor.start_measurement()
             dust_data = sensor.read_data()
 
-            if dust_level is None:
-                print(f"Measurement failed at {point}. Retrying...")
-            elif dust_level <= ucl_limit:
-                print(f"Dust level at {point} is within range: {dust_level}")
-                break  
+            #  data = {
+            #     'measurement_datetime': datetime.date.today(),
+            #     'room': 'CR11',
+            #     'area': '1K',
+            #     #'location_name': 'location', 
+            #     #'count': count,# Add in loop
+            #     'um01': response.registers[9],
+            #     'um03': response.registers[17],
+            #     'um05': response.registers[19],
+            #     'running_state': 1,
+            #     #'alarm_high': 0,
+            # }
+
+            dust_data['location_name'] = point
+            dust_data['count'] = count
+            um03 = dust_data['um03']
+
+            if um03 > ucl_limit:
+                dust_data['alarm_high'] = 1
             else:
-                print(f"Dust level at {point} exceeded UCL ({dust_level}). Retrying {count}/{max_retries}...")
+                dust_data['alarm_high'] = 0
+
+            print(dust_data)
 
             try:
-                db.save_measurement(dust_data)
-                print(f"Saved measurement at {point}: {dust_level}: {count}")
+                list_buffer = []
+                list_buffer.append(tuple(dust_data.values()))
+                db.save_measurement(list_buffer)
+
+                Logging.save_log(dust_data)
+                print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
             except Exception as e:
                 print(f"Database error: {e}. Storing offline.")
-                dust_data_buffer.append(dust_data)
+                dust_data_buffer.append(list_buffer)
+
+
+            if um03 > ucl_limit:
+                print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um01}). Retrying ...")
+            else:
+                break
 
             count += 1
             time.sleep(2)
@@ -212,7 +248,7 @@ def go_task():
         for dust_data in dust_data_buffer:
             try:
                 db.save_measurement(dust_data)
-                print(f"Recovered and saved {dust_data.point}: {dust_data.dust_level}: {dust_data.count}")
+                print(f"Recovered and saved {dust_data['location_name']}, count: {dust_data['count']}")
                 dust_data_buffer.remove(dust_data)
             except Exception as e:
                 print(f"Still unable to save {point}: {e}")

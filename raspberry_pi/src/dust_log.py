@@ -13,7 +13,8 @@ class DustLogger:
         now = datetime.datetime.now()
         year_month = now.strftime("%Y-%m")
         date = now.strftime("%d")
-        dir_path = os.path.join(year_month, date, location)
+        desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
+        dir_path = os.path.join(desktop_path, "Log", year_month, date, location)
         os.makedirs(dir_path, exist_ok=True)
         
         log_file = os.path.join(dir_path, f"{year_month}-{date}_{location}.log")
@@ -29,13 +30,12 @@ class DustLogger:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
     
-    def save_log(self, data, count):
+    def save_log(self, data):
         """ Save log with dynamic location """
         # Set up logger only when save_log is called
-        self.setup_logger(data['location'])
-        data['count'] = count
+        self.setup_logger(data['location_name'])
         # Log data
         self.logger.info(json.dumps(data, ensure_ascii=False))
         
-
-    
+#Dust = DustLogger()
+#Dust.save_log({'location':'room6','ucl1':15},2)

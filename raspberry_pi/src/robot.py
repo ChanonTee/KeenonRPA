@@ -58,7 +58,7 @@ class Robot:
                 print("Waiting for full response...")
                 response = self.receive_large_response()
                 print("Full Response Received:\n")
-                time.sleep(1)
+                time.sleep(2)
                 return response
 
             else:  # Handle regular commands
@@ -66,7 +66,7 @@ class Robot:
                 if not response:
                     print("No response received.")
                 print("Response:", response)
-                time.sleep(1)
+                time.sleep(2)
                 return response
 
         except Exception as e:
