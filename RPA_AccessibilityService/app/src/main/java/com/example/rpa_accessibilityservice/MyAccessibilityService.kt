@@ -15,7 +15,7 @@ class MyAccessibilityService : AccessibilityService() {
     private var socket: Socket? = null
     private var writer: PrintWriter? = null
     private var reader: BufferedReader? = null
-    private var isRunning = false
+    private var isRunning = true
 
     override fun onServiceConnected() {
         super.onServiceConnected()
@@ -33,36 +33,43 @@ class MyAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun connectToServer(ip: String, port: Int) {
+    private fun attemptReconnect(ip: String, port: Int) {
         Thread {
-            try {
-                socket = Socket(ip, port)
-                writer = PrintWriter(BufferedWriter(OutputStreamWriter(socket?.getOutputStream())), true)
-                reader = BufferedReader(InputStreamReader(socket?.getInputStream()))
-                Log.d("AccessibilityService", "Connected to server: $ip:$port")
+            while (isRunning && (socket == null || !socket!!.isConnected || socket!!.isClosed)) {
+                try {
+                    Log.d("AccessibilityService", "Attempting to reconnect...")
+                    socket = Socket(ip, port)
+                    writer = PrintWriter(BufferedWriter(OutputStreamWriter(socket?.getOutputStream())), true)
+                    reader = BufferedReader(InputStreamReader(socket?.getInputStream()))
+                    Log.d("AccessibilityService", "Reconnected to server: $ip:$port")
 
-                // Read and handle commands
-                while (isRunning) {
-                    val command = reader?.readLine()
-                    if (command != null) {
-                        Log.d("AccessibilityService", "Received command: $command")
-                        handleCommand(command)
-                    } else {
-                        Log.d("AccessibilityService", "No command received. Closing connection.")
-                        break
+
+                    while (isRunning) {
+                        val command = reader?.readLine()
+                        if (command != null) {
+                            Log.d("AccessibilityService", "Received command: $command")
+                            handleCommand(command)
+                        } else {
+                            Log.d("AccessibilityService", "Command is null, connection might be lost")
+                            break
+                        }
                     }
+                } catch (e: IOException) {
+                    Log.e("AccessibilityService", "Reconnect failed: ${e.message}")
+                    Thread.sleep(10000) // wait before retry
+                } finally {
+                    closeConnection()
                 }
-            } catch (e: IOException) {
-                Log.e("AccessibilityService", "Connection error: ${e.message}")
-            } finally {
-                closeConnection() // Ensure the socket is closed on error or disconnect
             }
         }.start()
     }
 
+    private fun connectToServer(ip: String, port: Int) {
+        attemptReconnect(ip, port)
+    }
+
     private fun closeConnection() {
         try {
-            isRunning = false
             reader?.close()
             writer?.close()
             socket?.close()
@@ -96,6 +103,9 @@ class MyAccessibilityService : AccessibilityService() {
             }
 
             when (command) {
+                "ping" -> {
+                    sendResponse("pong")
+                }
                 "goHome", "goBack", "showRecents" -> performGlobalActionByCommand(command)
                 "scrollUp", "scrollDown" -> performScroll(rootNode, command)
 

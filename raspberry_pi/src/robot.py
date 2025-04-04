@@ -1,8 +1,10 @@
 import socket
 import time
-import re
+import select
 from dotenv import load_dotenv
 import os
+import threading
+import re
 
 # Load configuration from .env file
 load_dotenv()
@@ -10,26 +12,68 @@ load_dotenv()
 class Robot:
     def __init__(self):
         """Initialize the robot server with settings from .env file"""
-        self.server_bind = os.getenv("RPA_BIND")  # IP address to bind to (e.g., "0.0.0.0")
-        self.server_port = int(os.getenv("RPA_PORT", 12345))  # Port to bind to (default 12345)
+        self.server_bind = os.getenv("RPA_BIND", "0.0.0.0")
+        self.server_port = int(os.getenv("RPA_PORT", 12345))
         self.server_socket = None
         self.client_socket = None
+        self.lock = threading.Lock()
+
 
     def start_server(self):
-        """Start the server to accept connections from Android device"""
+        """Start the TCP server"""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.server_socket.bind((self.server_bind, self.server_port))
         self.server_socket.listen(1)
-        print("Server started, waiting for connection...")
+        print(f"Server listening on {self.server_bind}:{self.server_port}")
 
-        while self.client_socket is None:
-            try:
+        while True:
+            # Wait for a client to connect
+            if self.client_socket is None:
+                print("Waiting for Android device to connect...")
                 self.client_socket, addr = self.server_socket.accept()
                 print(f"Connected to Android device at {addr}")
-                print("client:", self.client_socket)
-            except Exception as e:
-                print(f"Error in connection: {e}")
+            else:
+                # Check if the client is still connected
+                self.lock.acquire()
+                if not self.is_client_connected():
+                    print("Client disconnected, waiting for reconnect...")
+                    self.cleanup_client()
+                self.lock.release()
+
+            time.sleep(10)  # avoid busy loop
+            
+    def start_server_in_background(self):
+        """Start the TCP server in a new thread"""
+        thread = threading.Thread(target=self.start_server, daemon=True)
+        thread.start()
+
+
+    def is_client_connected(self):
+        """Check if the client is still connected (non-blocking)"""
+        try:
+            response = self.send_command("ping") 
+            if response.strip() == "pong":
+                #print("Client is still connected.")
+                return True
+            #print("Client is not responding to ping.")
+            return False
+        
+        except (socket.error, socket.timeout):
+            #print("Client is not connected.")
+            return False
+        except Exception as e:
+            #print(f"Unexpected error: {e}")
+            return False
+        
+    def cleanup_client(self):
+        """Close and reset client socket"""
+        try:
+            if self.client_socket:
+                self.client_socket.close()
+        except Exception:
+            pass
+        self.client_socket = None
 
     def receive_large_response(self):
         """Receive a large response from the client in chunks"""
@@ -51,23 +95,34 @@ class Robot:
     def send_command(self, command):
         """Send command to the Android device and receive response"""
         try:
-            print(f"Sending command: {command}")
-            self.client_socket.sendall((command + '\n').encode())
+            if command == "ping":
+                self.client_socket.sendall((command + '\n').encode())
+                response = self.client_socket.recv(4096).decode('utf-8')
+                if not response:
+                    print("No response received.")
+                time.sleep(2)
+                return response
 
             if command == "getFullUI":  # Handle large responses
+                print(f"Sending command: {command}")
+                self.client_socket.sendall((command + '\n').encode())
+
                 print("Waiting for full response...")
                 response = self.receive_large_response()
                 print("Full Response Received:\n")
                 time.sleep(2)
                 return response
 
-            else:  # Handle regular commands
-                response = self.client_socket.recv(4096).decode('utf-8')
-                if not response:
-                    print("No response received.")
-                print("Response:", response)
-                time.sleep(2)
-                return response
+           # Handle regular commands
+            print(f"Sending command: {command}")
+            self.client_socket.sendall((command + '\n').encode())
+
+            response = self.client_socket.recv(4096).decode('utf-8')
+            if not response:
+                print("No response received.")
+            print("Response:", response)
+            time.sleep(2)
+            return response
 
         except Exception as e:
             print(f"Error handling client: {e}")

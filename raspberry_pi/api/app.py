@@ -26,7 +26,7 @@ db = Database()
 Logging = DustLogger()
 
 # Start the robot server
-robot.start_server()
+robot.start_server_in_background()
 
 # List to store destination points
 points = []
@@ -39,6 +39,22 @@ max_wait = int(os.getenv("MAX_WAIT", 120))
 stop_event = threading.Event()
 lock = threading.Lock()
 robot_thread = None  # Store the robot's thread
+
+@app.get("/check-robot-connection")
+async def check_robot_connection():
+    """
+    Check if the robot is connected.
+    """
+    if robot.is_client_connected():
+        return JSONResponse(
+                content={"message": "True"},
+                status_code=200 
+            )
+    return JSONResponse(
+                content={"message": "False"},
+                status_code=200 
+            )
+
 
 class PointRequest(BaseModel):
     point: str  # Define a request model for receiving destination points
@@ -142,7 +158,7 @@ def go_task():
     global stop_event, points, dust_data_buffer
 
     if not points:
-        print("No points to go.")
+        print("No points in queue.")
         return
 
     robot.send_command("goHome")
@@ -274,7 +290,14 @@ async def go():
                 content={"message": "Robot process is already running."},
                 status_code=400 # Return a 400 Bad Request if already running
             )
-        
+            
+    if not points:
+        print("No points in queue.")
+        return JSONResponse(
+                content={"message": "No points in queue."},
+                status_code=400 
+            )
+
     stop_event.clear()
     robot_thread = threading.Thread(target=go_task, daemon=True)
     robot_thread.start()
