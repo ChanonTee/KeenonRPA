@@ -26,6 +26,13 @@ class Database:
             self.cursor = self.conn.cursor()
         except pymssql.Error as e:
             print(f"Database connection error: {e}")
+            
+    def __close(self):
+        # Close database connection
+        if self.cursor:
+            self.cursor.close()
+        if self.conn:
+            self.conn.close()
 
     def save_measurement(self, data):
         # Insert measurement data into the DustMeasurements table
@@ -50,9 +57,4 @@ class Database:
         finally:
             self.__close()
 
-    def __close(self):
-        # Close database connection
-        if self.cursor:
-            self.cursor.close()
-        if self.conn:
-            self.conn.close()
+   

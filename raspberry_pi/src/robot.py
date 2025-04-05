@@ -35,12 +35,11 @@ class Robot:
                 print(f"Connected to Android device at {addr}")
             else:
                 # Check if the client is still connected
-                self.lock.acquire()
-                if not self.is_client_connected():
-                    print("Client disconnected, waiting for reconnect...")
-                    self.cleanup_client()
-                self.lock.release()
-
+                with self.lock:
+                    if not self.is_client_connected():
+                        print("Client disconnected, waiting for reconnect...")
+                        self.cleanup_client()
+                        
             time.sleep(10)  # avoid busy loop
             
     def start_server_in_background(self):
@@ -100,7 +99,6 @@ class Robot:
                 response = self.client_socket.recv(4096).decode('utf-8')
                 if not response:
                     print("No response received.")
-                time.sleep(2)
                 return response
 
             if command == "getFullUI":  # Handle large responses

@@ -1,13 +1,13 @@
 from src import Robot, Sensor, Database, DustLogger
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
 from dotenv import load_dotenv
 import threading
 import time
 import os
-
 
 # Load configuration from .env file
 load_dotenv()
@@ -19,11 +19,21 @@ python -m uvicorn api.app:app --host 0.0.0.0 --port 8000
 
 app = FastAPI()
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 # Initialize robot, sensor, and database objects
 robot = Robot()
 sensor = Sensor()
 db = Database()
 Logging = DustLogger()
+
+
 
 # Start the robot server
 robot.start_server_in_background()
@@ -45,41 +55,14 @@ async def check_robot_connection():
     """
     Check if the robot is connected.
     """
-    if robot.is_client_connected():
-        return JSONResponse(
-                content={"message": "True"},
-                status_code=200 
-            )
+    with lock:
+        if robot.is_client_connected():
+            return JSONResponse(
+                    content={"message": "True"},
+                    status_code=200 
+                )
     return JSONResponse(
                 content={"message": "False"},
-                status_code=200 
-            )
-
-
-class PointRequest(BaseModel):
-    point: str  # Define a request model for receiving destination points
-
-@app.post("/add-point")
-async def add_point(data: PointRequest):
-    """
-    Add a single destination point to the robot's queue.
-
-    This endpoint allows a user to add one destination point to the queue. 
-    The robot will later visit these points and perform measurements.
-
-    **Request body**:
-    - **points**: A list of destination points to be added. Example: 
-    {
-        "point": 6002-IS-1K017-default
-    }
-    **Response**:
-    - A message indicating the point that were added and The current list of destination points.
-    """
-    point = data.point
-    points.append(point)
-    print(f"Added {point} to the queue.")
-    return JSONResponse(
-                content={"message": f"Added {point} to the queue.", "points": points},
                 status_code=200 
             )
 
@@ -145,8 +128,13 @@ async def del_points():
                 content={"message": "Delete all points"},
                 status_code=200 
             )
+    
+  
+"""
+    Dust measurement mode
+"""
 
-def go_task():
+def start_dust_task(required_send_database):
     """
     Task to move the robot through all points in the queue and perform measurements.
 
@@ -204,6 +192,8 @@ def go_task():
             
         print(f"Robot at point: {point}")
 
+
+        # Dust measurement
         count = 1
         um01 = None
         while count < max_retries + 1:
@@ -237,6 +227,10 @@ def go_task():
 
             print(dust_data)
 
+            if not required_send_database:
+                print("Not required to send data to database.")
+                continue
+            
             try:
                 list_buffer = []
                 list_buffer.append(tuple(dust_data.values()))
@@ -271,45 +265,54 @@ def go_task():
 
     print("All measurements completed.")
 
-@app.get("/go")
-async def go():
+class OperationRequest(BaseModel):
+    required_send_database: bool
+
+@app.post("/start-dust")
+async def start_dust(request: OperationRequest):
     """
     Start the robot process to go through all points in the queue.
 
     This endpoint starts the robot's task of going to all destination points in the queue 
     and performing measurements at each point.
 
+    **Request Body**:
+    - required_send_database (bool): Whether to send measurement data to the database.
+
     **Response**: A message indicating the robot process has started.
     """
     global robot_thread, stop_event
-    
-    # If the robot is already working
-    with lock: 
+
+    with lock:
         if robot_thread is not None and robot_thread.is_alive():
             return JSONResponse(
                 content={"message": "Robot process is already running."},
-                status_code=400 # Return a 400 Bad Request if already running
-            )
-            
-    if not points:
-        print("No points in queue.")
-        return JSONResponse(
-                content={"message": "No points in queue."},
-                status_code=400 
+                status_code=400
             )
 
+    if not points:
+        return JSONResponse(
+            content={"message": "No points in queue."},
+            status_code=400
+        )
+
     stop_event.clear()
-    robot_thread = threading.Thread(target=go_task, daemon=True)
+
+    robot_thread = threading.Thread(
+        target=start_dust_task,
+        args=(request.required_send_database,),  
+        daemon=True
+    )
     robot_thread.start()
 
     return JSONResponse(
-                content={"message": "Robot process started."},
-                status_code=200 
-            )
+        content={"message": "Robot process started."},
+        status_code=200
+    )
 
 
-@app.get("/stop")
-async def stop():
+@app.get("/stop-dust")
+async def stop_dust():
     """
     Stop the robot process.
 
@@ -339,3 +342,93 @@ async def stop():
                 content={"message": "Stopping robot process..."},
                 status_code=200 
             )
+
+"""
+    Transportation mode
+"""
+
+def start_transportation_task():
+    """
+        Task to move the robot through all points in the queue.
+        This function will:
+        
+    """
+    
+    robot.send_command("goHome")
+    time.sleep(1)
+    robot.send_command("Peanut Food Delivery")
+    time.sleep(3)
+
+
+    while points:
+        if stop_event.is_set():
+            print("Interrupted: Stopping robot process...")
+            return
+
+        point = points.pop(0)  # Run in queue FIFO
+        robot.send_command("clickBackButton")
+        robot.send_command("Direct")
+        
+        if not robot.search_ui_and_click(point):
+            print(f"No point found skip {point}")
+            continue
+        
+        if stop_event.is_set():
+            print("Interrupted: Stopping robot process...")
+            return
+        
+        robot.send_command("Go")
+        time.sleep(1)
+
+        now_sec = 0
+        while not robot.is_have_ui("Go"):
+            
+            if stop_event.is_set():
+                print("Interrupted: Stopping robot process")
+                return
+            
+            time.sleep(1)
+            now_sec += 1
+            print(f"Waiting {now_sec}/{max_wait}")
+            
+            if now_sec >= max_wait:
+                print("Timeout")
+                break
+            
+        print(f"Robot at point: {point}")
+
+
+@app.post("/start-transportation")
+async def start_transportation():
+    """
+    Start the robot process to go through all points in the queue.
+ 
+    **Response**: A message indicating the robot process has started.
+    """
+    global robot_thread, stop_event
+
+    with lock:
+        if robot_thread is not None and robot_thread.is_alive():
+            return JSONResponse(
+                content={"message": "Robot process is already running."},
+                status_code=400
+            )
+
+    if not points:
+        return JSONResponse(
+            content={"message": "No points in queue."},
+            status_code=400
+        )
+
+    stop_event.clear()
+
+    robot_thread = threading.Thread(
+        target=start_dust_task,
+        daemon=True
+    )
+    robot_thread.start()
+
+    return JSONResponse(
+        content={"message": "Robot process started."},
+        status_code=200
+    )
