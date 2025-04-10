@@ -1,4 +1,6 @@
-from src import Robot, Sensor, Database, DustLogger
+import datetime
+import random
+from src import Robot, Database
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -29,9 +31,9 @@ app.add_middleware(
 
 # Initialize robot, sensor, and database objects
 robot = Robot()
-sensor = Sensor()
+# sensor = Sensor()
 db = Database()
-Logging = DustLogger()
+# Logging = DustLogger()
 
 
 
@@ -137,12 +139,8 @@ async def del_points():
 def start_dust_task(required_send_database):
     """
     Task to move the robot through all points in the queue and perform measurements.
-
-    This function will:
-    - Move the robot to each point in the queue.
-    - Perform a dust level measurement at each point.
-    - Retry the measurement if the dust level exceeds the UCL (User Control Limit).
     """
+
     global stop_event, points, dust_data_buffer
 
     if not points:
@@ -153,7 +151,6 @@ def start_dust_task(required_send_database):
     time.sleep(1)
     robot.send_command("Peanut Food Delivery")
     time.sleep(3)
-
 
     while points:
         if stop_event.is_set():
@@ -173,11 +170,11 @@ def start_dust_task(required_send_database):
             return
         
         robot.send_command("Go")
+        db.save_log([(datetime.datetime.now(), point, "Going to point["+point+"]")])
         time.sleep(1)
 
         now_sec = 0
         while not robot.is_have_ui("Go"):
-            
             if stop_event.is_set():
                 print("Interrupted: Stopping robot process")
                 return
@@ -191,35 +188,31 @@ def start_dust_task(required_send_database):
                 break
             
         print(f"Robot at point: {point}")
-
+        db.save_log([(datetime.datetime.now(), point, "Arrived at point")])
+        time.sleep(2)
 
         # Dust measurement
         count = 1
-        um01 = None
         while count < max_retries + 1:
             print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
+            db.save_log([(datetime.datetime.now(), point, "Start measurement")])
+            time.sleep(5)
             dust_data = {}
 
-            sensor.start_measurement()
-            dust_data = sensor.read_data()
-
-            #  data = {
-            #     'measurement_datetime': datetime.date.today(),
-            #     'room': 'CR11',
-            #     'area': '1K',
-            #     #'location_name': 'location', 
-            #     #'count': count,# Add in loop
-            #     'um01': response.registers[9],
-            #     'um03': response.registers[17],
-            #     'um05': response.registers[19],
-            #     'running_state': 1,
-            #     #'alarm_high': 0,
-            # }
+            # สุ่มค่าฝุ่นในแต่ละตัว
+            dust_data = {
+                'um01': int(random.uniform(0, ucl_limit * 1.5)),
+                'um03': int(random.uniform(0, ucl_limit * 1.5)),
+                'um05': int(random.uniform(0, ucl_limit * 1.5)),
+                'um10': int(random.uniform(0, ucl_limit * 1.5)),
+                'um50': int(random.uniform(0, ucl_limit * 1.5)),
+            }
 
             dust_data['location_name'] = point
             dust_data['count'] = count
             um03 = dust_data['um03']
 
+            # เช็คว่าเกิน UCL หรือไม่
             if um03 > ucl_limit:
                 dust_data['alarm_high'] = 1
             else:
@@ -232,26 +225,44 @@ def start_dust_task(required_send_database):
                 continue
             
             try:
-                list_buffer = []
-                list_buffer.append(tuple(dust_data.values()))
+                record = (
+                    datetime.datetime.now(),
+                    'CR11',
+                    '1K',
+                    dust_data['location_name'],
+                    dust_data['count'],
+                    dust_data['um01'],
+                    dust_data['um03'],
+                    dust_data['um05'],
+                    dust_data['um10'],
+                    dust_data['um50'],
+                    1,
+                    dust_data['alarm_high'],
+                )
+                list_buffer = [record]
+
+                # ส่งข้อมูลไปยังฐานข้อมูล
                 db.save_measurement(list_buffer)
 
-                Logging.save_log(dust_data)
                 print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
+                db.save_log([(datetime.datetime.now(), point, "Saved measurement count: "+str(dust_data['count']))])
             except Exception as e:
                 print(f"Database error: {e}. Storing offline.")
                 dust_data_buffer.append(list_buffer)
 
-
+            # หากค่าฝุ่นเกิน UCL ให้ลองใหม่
             if um03 > ucl_limit:
-                print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um01}). Retrying ...")
+                print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um03}). Retrying ...")
+                db.save_log([(datetime.datetime.now(), point, "Result fail, retry...")])
             else:
+                db.save_log([(datetime.datetime.now(), point, "Result Pass")])
                 break
 
             count += 1
             time.sleep(2)
 
         print(f"Finished point: {point}")
+        db.save_log([(datetime.datetime.now(), point, "Finished measurement")])
 
     if dust_data_buffer:
         print("Retrying to save measurements...")
@@ -324,9 +335,9 @@ async def stop_dust():
     global robot_thread, stop_event
 
     # Stop the sensor measurement if it's running
-    if sensor.is_measuring:
-        sensor.stop_measurement()
-        print("Sensor measurement stopped.")
+    # if sensor.is_measuring:
+    #     sensor.stop_measurement()
+    #     print("Sensor measurement stopped.")
 
     # Check if the robot process has already started
     with lock: 

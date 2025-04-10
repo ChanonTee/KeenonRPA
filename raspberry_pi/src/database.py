@@ -41,8 +41,8 @@ class Database:
 
             query = """
                 INSERT INTO DustMeasurements 
-                (measurement_datetime, room, area, location_name, count, um01, um03, um05, running_state, alarm_high) 
-                VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d)
+                (measurement_datetime, room, area, location_name, count, um01, um03, um05, um10, um50, running_state, alarm_high) 
+                VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d)
                 """
 
             for record in data:
@@ -50,6 +50,29 @@ class Database:
 
             self.conn.commit()
             print("Data inserted successfully!")
+        except pymssql.Error as e:
+            print(f"Database error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        finally:
+            self.__close()
+
+    def save_log(self, log_data):
+        # Insert log data into the DustLog table
+        try:
+            self.__connect()
+
+            query = """
+                INSERT INTO ActivityLogs 
+                (log_timestamp, location_name, activity) 
+                VALUES (%s, %s, %s)
+                """
+
+            for record in log_data:
+                self.cursor.execute(query, record)
+
+            self.conn.commit()
+            print("Log data inserted successfully!")
         except pymssql.Error as e:
             print(f"Database error: {e}")
         except Exception as e:
