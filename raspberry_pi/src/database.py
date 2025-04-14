@@ -16,6 +16,31 @@ class Database:
         
         self.conn = None
         self.cursor = None
+        
+    def is_database_connected(self):
+        try:
+            # Attempt to connect to the database
+            conn = pymssql.connect(
+                server=self.server, user=self.username, password=self.password, database=self.database
+            )
+            cursor = conn.cursor()
+
+            # Test the connection by executing a simple query
+            cursor.execute('SELECT @@VERSION')
+            version = cursor.fetchone()
+
+            # If no exception occurs and we get a version, the connection is successful
+            print(f"Connected to SQL Server, version: {version[0]}")
+            cursor.close()
+            conn.close()
+            return True
+        except pymssql.Error as e:
+            print(f"Database connection error: {e}")
+            return False
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            return False
+
 
     def __connect(self):
         # Establish connection to the SQL Server
@@ -33,6 +58,7 @@ class Database:
             self.cursor.close()
         if self.conn:
             self.conn.close()
+            
 
     def save_measurement(self, data):
         # Insert measurement data into the DustMeasurements table
@@ -45,11 +71,54 @@ class Database:
                 VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d)
                 """
 
-            for record in data:
-                self.cursor.execute(query, record)
+            # Check if data is a list of tuples or a single tuple
+            if isinstance(data, list):
+                if len(data) > 0 and isinstance(data[0], tuple):  # Multiple rows (list of tuples)
+                    self.cursor.executemany(query, data)
+                else:
+                    print("Data format is not correct for a list of tuples.")
+                    return
+            elif isinstance(data, tuple):  # Single row (single tuple)
+                self.cursor.execute(query, data)
+            else:
+                print("Data format is not correct.")
+                return
 
             self.conn.commit()
-            print("Data inserted successfully!")
+            print("Dust data inserted successfully!")
+        except pymssql.Error as e:
+            print(f"Database error: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+        finally:
+            self.__close()
+    
+    def save_activity_log(self, data):
+        # Insert activity log data into the ActivityLog table
+        try:
+            self.__connect()
+
+            query = """
+                INSERT INTO ActivityLog 
+                (timestamp, location_name, activity) 
+                VALUES (%s, %s, %s)
+                """
+
+            # Check if data is a list of tuples or a single tuple
+            if isinstance(data, list):
+                if len(data) > 0 and isinstance(data[0], tuple):  # Multiple rows (list of tuples)
+                    self.cursor.executemany(query, data)
+                else:
+                    print("Data format is not correct for a list of tuples.")
+                    return
+            elif isinstance(data, tuple):  # Single row (single tuple)
+                self.cursor.execute(query, data)
+            else:
+                print("Data format is not correct.")
+                return
+
+            self.conn.commit()
+            print("Activity log inserted successfully!")
         except pymssql.Error as e:
             print(f"Database error: {e}")
         except Exception as e:

@@ -1,13 +1,18 @@
 from src import Robot, Sensor, Database, DustLogger
+
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List
+
+import os
 from dotenv import load_dotenv
+
 import threading
 import time
-import os
+
+import datetime
 
 # Load configuration from .env file
 load_dotenv()
@@ -31,7 +36,7 @@ app.add_middleware(
 robot = Robot()
 sensor = Sensor()
 db = Database()
-Logging = DustLogger()
+logger = DustLogger()
 
 
 
@@ -41,6 +46,7 @@ robot.start_server_in_background()
 # List to store destination points
 points = []
 dust_data_buffer = []
+activity_buffer = []
 ucl_limit = int(os.getenv("UCL_LIMIT"))
 max_retries = int(os.getenv("MAX_RETRIES", 3))
 max_wait = int(os.getenv("MAX_WAIT", 120))
@@ -54,6 +60,7 @@ robot_thread = None  # Store the robot's thread
 async def check_robot_connection():
     """
     Check if the robot is connected.
+    returns True if the robot is connected, otherwise False.
     """
     with lock:
         if robot.is_client_connected():
@@ -61,6 +68,40 @@ async def check_robot_connection():
                     content={"message": "True"},
                     status_code=200 
                 )
+    return JSONResponse(
+                content={"message": "False"},
+                status_code=200 
+            )
+
+@app.get("/check-sensor-connection")
+async def check_sensor_connection():
+    """
+    Check if the sensor is connected.
+    returns True if the sensor is connected and measuring, otherwise False.
+    """
+    if sensor.is_measuring or sensor.is_sensor_connected():
+        return JSONResponse(
+                    content={"message": "True"},
+                    status_code=200 
+                )
+        
+    return JSONResponse(
+                content={"message": "False"},
+                status_code=200 
+            )
+    
+@app.get("/check-database-connection")
+async def check_database_connection():
+    """
+    Check if the database is connected.
+    returns True if the database is connected, otherwise False.
+    """
+    if db.is_connected():
+        return JSONResponse(
+                    content={"message": "True"},
+                    status_code=200 
+                )
+        
     return JSONResponse(
                 content={"message": "False"},
                 status_code=200 
@@ -112,7 +153,7 @@ async def get_points():
                 status_code=200 
             )
 
-@app.get("/del-points")
+@app.delete("/del-points")
 async def del_points():
     """
     Delete all destination points in the queue.
@@ -143,7 +184,7 @@ def start_dust_task(required_send_database):
     - Perform a dust level measurement at each point.
     - Retry the measurement if the dust level exceeds the UCL (User Control Limit).
     """
-    global stop_event, points, dust_data_buffer
+    global stop_event, points, dust_data_buffer, activity_buffer
 
     if not points:
         print("No points in queue.")
@@ -173,8 +214,17 @@ def start_dust_task(required_send_database):
             return
         
         robot.send_command("Go")
-        time.sleep(1)
+        print(f"Robot is going to {point}...")
+        
+        activity = (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Going to [{point}]")
+        try:
+            db.save_activity_log(activity)
+            print(f"Saved activity log at {point}")
+        except Exception as e:
+            activity_buffer.append(activity)
+            print(f"Database error: {e}. Storing offline.")
 
+        time.sleep(1)
         now_sec = 0
         while not robot.is_have_ui("Go"):
             
@@ -232,16 +282,15 @@ def start_dust_task(required_send_database):
                 continue
             
             try:
-                list_buffer = []
-                list_buffer.append(tuple(dust_data.values()))
-                db.save_measurement(list_buffer)
-
-                Logging.save_log(dust_data)
+                tuple_dust_data = tuple(dust_data.values())
+                db.save_measurement(tuple_dust_data)
                 print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
+                
+                logger.save_measurement_log(dust_data)
+
             except Exception as e:
                 print(f"Database error: {e}. Storing offline.")
-                dust_data_buffer.append(list_buffer)
-
+                dust_data_buffer.append(tuple_dust_data)
 
             if um03 > ucl_limit:
                 print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um01}). Retrying ...")
@@ -255,13 +304,12 @@ def start_dust_task(required_send_database):
 
     if dust_data_buffer:
         print("Retrying to save measurements...")
-        for dust_data in dust_data_buffer:
-            try:
-                db.save_measurement(dust_data)
-                print(f"Recovered and saved {dust_data['location_name']}, count: {dust_data['count']}")
-                dust_data_buffer.remove(dust_data)
-            except Exception as e:
-                print(f"Still unable to save {point}: {e}")
+        try:
+            db.save_measurement(dust_data)
+            print(f"Recovered and saved {dust_data['location_name']}, count: {dust_data['count']}")
+            dust_data_buffer.clear()
+        except Exception as e:
+            print(f"Still unable to save {point}: {e}")
 
     print("All measurements completed.")
 
@@ -423,7 +471,7 @@ async def start_transportation():
     stop_event.clear()
 
     robot_thread = threading.Thread(
-        target=start_dust_task,
+        target=start_transportation_task,
         daemon=True
     )
     robot_thread.start()
@@ -432,3 +480,31 @@ async def start_transportation():
         content={"message": "Robot process started."},
         status_code=200
     )
+    
+@app.get("/stop-transportation")
+async def stop_transportation():
+    """
+    Stop the robot process.
+
+    This endpoint stops the robot from continuing its tasks. The task will stop at the current point.
+    If the robot process hasn't started, it will return a message indicating no active process.
+    
+    **Response**: A message indicating the robot process is being stopped or that no process is running.
+    """
+    global robot_thread, stop_event
+
+    # Check if the robot process has already started
+    with lock: 
+        if robot_thread is None or not robot_thread.is_alive():
+            return JSONResponse(
+                content={"message": "No active robot process to stop."},
+                status_code=400 # Return a 400 Bad Request if not running
+            )
+
+    # If the robot process is running, stop it
+    stop_event.set()
+    return JSONResponse(
+                content={"message": "Stopping robot process..."},
+                status_code=200 
+            )
+    

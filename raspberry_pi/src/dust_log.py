@@ -1,13 +1,13 @@
+import logging
 import os
 import datetime
-import logging
 import json
 
 class DustLogger:
     def __init__(self):
         self.logger = None
     
-    #บันทึกค่าตามวันที่  Year-Month/Date/Location/*.log
+    # Save log in Year-Month/Date/Location/*.log
     def setup_logger(self, location):
         """ Setup logger """
         now = datetime.datetime.now()
@@ -30,12 +30,10 @@ class DustLogger:
         handler.setFormatter(formatter)
         self.logger.addHandler(handler)
     
-    def save_log(self, data):
+    def save_measurement_log(self, data):
         """ Save log with dynamic location """
         # Set up logger only when save_log is called
         self.setup_logger(data['location_name'])
         # Log data
         self.logger.info(json.dumps(data, ensure_ascii=False))
         
-#Dust = DustLogger()
-#Dust.save_log({'location':'room6','ucl1':15},2)
