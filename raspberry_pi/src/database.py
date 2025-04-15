@@ -67,8 +67,8 @@ class Database:
 
             query = """
                 INSERT INTO DustMeasurements 
-                (measurement_datetime, room, area, location_name, count, um01, um03, um05, running_state, alarm_high) 
-                VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d)
+                (measurement_datetime, room, area, location_name, count, um01, um02, um03, um05, um07, um10, running_state, alarm_high) 
+                VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d, %d)
                 """
 
             # Check if data is a list of tuples or a single tuple
@@ -103,7 +103,7 @@ class Database:
                 (timestamp, location_name, activity) 
                 VALUES (%s, %s, %s)
                 """
-
+        
             # Check if data is a list of tuples or a single tuple
             if isinstance(data, list):
                 if len(data) > 0 and isinstance(data[0], tuple):  # Multiple rows (list of tuples)

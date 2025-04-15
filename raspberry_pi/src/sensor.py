@@ -107,8 +107,11 @@ class Sensor:
                 'location_name': None,
                 'count': None,
                 'um01': response.registers[9],
+                'um02': response.registers[11],
                 'um03': response.registers[17],
                 'um05': response.registers[19],
+                'um07': response.registers[21],
+                'um10': response.registers[23],
                 'running_state': 1,
                 'alarm_high': None,
             }
