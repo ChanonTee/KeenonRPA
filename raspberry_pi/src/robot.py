@@ -1,6 +1,5 @@
 import socket
 import time
-import select
 from dotenv import load_dotenv
 import os
 import threading
@@ -96,7 +95,7 @@ class Robot:
         try:
             if command == "ping":
                 self.client_socket.sendall((command + '\n').encode())
-                response = self.client_socket.recv(4096).decode('utf-8')
+                response = self.client_socket.recv(1024).decode('utf-8')
                 if not response:
                     print("No response received.")
                 return response
@@ -111,11 +110,11 @@ class Robot:
                 time.sleep(2)
                 return response
 
-           # Handle regular commands
+            # Handle regular commands
             print(f"Sending command: {command}")
             self.client_socket.sendall((command + '\n').encode())
 
-            response = self.client_socket.recv(4096).decode('utf-8')
+            response = self.client_socket.recv(1024).decode('utf-8')
             if not response:
                 print("No response received.")
             print("Response:", response)

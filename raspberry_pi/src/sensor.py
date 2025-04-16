@@ -1,8 +1,10 @@
 from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusIOException
-import time
+
 from dotenv import load_dotenv
 import os
+
+import time
 import datetime
 
 # Load sensor configuration from .env file
@@ -18,7 +20,7 @@ class Sensor:
 
         self.is_measuring = False
 
-    def check_connection(self):
+    def is_sensor_connected(self):
         """
         Method to check if we can connect to SOLAIR 1100LD
         """
@@ -105,8 +107,11 @@ class Sensor:
                 'location_name': None,
                 'count': None,
                 'um01': response.registers[9],
+                'um02': response.registers[11],
                 'um03': response.registers[17],
                 'um05': response.registers[19],
+                'um07': response.registers[21],
+                'um10': response.registers[23],
                 'running_state': 1,
                 'alarm_high': None,
             }
