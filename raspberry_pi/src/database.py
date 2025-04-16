@@ -100,7 +100,7 @@ class Database:
         # Insert activity log data into the ActivityLogs table
         query = """
             INSERT INTO ActivityLogs 
-            (timestamp, location_name, activity) 
+            (log_timestamp, location_name, activity) 
             VALUES (%s, %s, %s)
             """
         self.__save_to_database(data, query)
