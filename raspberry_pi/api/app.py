@@ -267,11 +267,29 @@ def start_dust_task(required_send_database):
 
             print(dust_data)
 
+            record = (
+                    datetime.datetime.now(),
+                    'CR11',
+                    '1K',
+                    dust_data['location_name'],
+                    dust_data['count'],
+                    dust_data['um01'],
+                    dust_data['um02'],
+                    dust_data['um03'],
+                    dust_data['um05'],
+                    dust_data['um10'],
+                    dust_data['um50'],
+                    1,
+                    dust_data['alarm_high'],
+                )
+            list_buffer = [record]
+
             # บันทึกลง database ถ้าเปิดใช้งาน
             if required_send_database:
                 try:
                     tuple_dust_data = tuple(dust_data.values())
-                    db.save_measurement(tuple_dust_data)
+                    print(f"Saving measurement: {list_buffer}")
+                    db.save_measurement(list_buffer)
                     print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
                     logger.save_measurement_log(dust_data)
                 except Exception as e:

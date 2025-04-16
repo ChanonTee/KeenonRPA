@@ -67,7 +67,7 @@ class Database:
 
             query = """
                 INSERT INTO DustMeasurements 
-                (measurement_datetime, room, area, location_name, count, um01, um02, um03, um05, um07, um10, running_state, alarm_high) 
+                (measurement_datetime, room, area, location_name, count, um01, um02, um03, um05, um10, um50, running_state, alarm_high) 
                 VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d, %d)
                 """
 
