@@ -74,22 +74,22 @@ async def check_robot_connection():
                 status_code=200 
             )
 
-@app.get("/check-sensor-connection")
-async def check_sensor_connection():
-    """
-    Check if the sensor is connected.
-    returns True if the sensor is connected and measuring, otherwise False.
-    """
-    if sensor.is_measuring or sensor.is_sensor_connected():
-        return JSONResponse(
-                    content={"message": "True"},
-                    status_code=200 
-                )
+# @app.get("/check-sensor-connection")
+# async def check_sensor_connection():
+#     """
+#     Check if the sensor is connected.
+#     returns True if the sensor is connected and measuring, otherwise False.
+#     """
+#     if sensor.is_measuring or sensor.is_sensor_connected():
+#         return JSONResponse(
+#                     content={"message": "True"},
+#                     status_code=200 
+#                 )
         
-    return JSONResponse(
-                content={"message": "False"},
-                status_code=200 
-            )
+#     return JSONResponse(
+#                 content={"message": "False"},
+#                 status_code=200 
+#             )
     
 @app.get("/check-database-connection")
 async def check_database_connection():
@@ -246,9 +246,6 @@ def start_dust_task(required_send_database):
             print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
             db.save_log([(datetime.datetime.now(), point, "Start measurement")])
             time.sleep(5)
-            dust_data = {}
-
-            # สุ่มค่าฝุ่นในแต่ละตัว
             dust_data = {
                 'um01': int(random.uniform(0, ucl_limit * 1.5)),
                 'um03': int(random.uniform(0, ucl_limit * 1.5)),
@@ -269,20 +266,16 @@ def start_dust_task(required_send_database):
 
             print(dust_data)
 
-            if not required_send_database:
-                print("Not required to send data to database.")
-                continue
-            
-            try:
-                tuple_dust_data = tuple(dust_data.values())
-                db.save_measurement(tuple_dust_data)
-                print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
-                
-                logger.save_measurement_log(dust_data)
-
-            except Exception as e:
-                print(f"Database error: {e}. Storing offline.")
-                dust_data_buffer.append(tuple_dust_data)
+            # บันทึกลง database ถ้าเปิดใช้งาน
+            if required_send_database:
+                try:
+                    tuple_dust_data = tuple(dust_data.values())
+                    db.save_measurement(tuple_dust_data)
+                    print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
+                    logger.save_measurement_log(dust_data)
+                except Exception as e:
+                    print(f"Database error: {e}. Storing offline.")
+                    dust_data_buffer.append(tuple_dust_data)
 
             if um03 > ucl_limit:
                 print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um03}). Retrying ...")
