@@ -60,12 +60,11 @@ async def check_robot_connection():
     Check if the robot is connected.
     returns True if the robot is connected, otherwise False.
     """
-    with lock:
-        if robot.is_client_connected():
-            return JSONResponse(
-                    content={"message": "True"},
-                    status_code=200 
-                )
+    if robot.is_client_connected():
+        return JSONResponse(
+                content={"message": "True"},
+                status_code=200 
+            )
     return JSONResponse(
                 content={"message": "False"},
                 status_code=200 
@@ -94,7 +93,7 @@ async def check_database_connection():
     Check if the database is connected.
     returns True if the database is connected, otherwise False.
     """
-    if db.is_connected():
+    if db.is_database_connected():
         return JSONResponse(
                     content={"message": "True"},
                     status_code=200 
@@ -329,13 +328,31 @@ async def start_dust(request: OperationRequest):
                 content={"message": "Robot process is already running."},
                 status_code=400
             )
-
+            
     if not points:
         return JSONResponse(
             content={"message": "No points in queue."},
             status_code=400
         )
-
+        
+    if not robot.is_client_connected():
+         return JSONResponse(
+            content={"message": "Robot not connect"},
+            status_code=400
+        )
+    
+    if not sensor.is_sensor_connected():
+         return JSONResponse(
+            content={"message": "Sensor not connect"},
+            status_code=400
+        )
+         
+    if not db.is_database_connected():
+         return JSONResponse(
+            content={"message": "Database not connect"},
+            status_code=400
+        )
+         
     stop_event.clear()
 
     robot_thread = threading.Thread(
@@ -463,6 +480,18 @@ async def start_transportation():
     if not points:
         return JSONResponse(
             content={"message": "No points in queue."},
+            status_code=400
+        )
+        
+    if not robot.is_client_connected():
+        return JSONResponse(
+            content={"message": "Robot not connect"},
+            status_code=400
+        )
+    
+    if not db.is_database_connected():
+        return JSONResponse(
+            content={"message": "Database not connect"},
             status_code=400
         )
 
