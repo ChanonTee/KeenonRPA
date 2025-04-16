@@ -248,6 +248,7 @@ def start_dust_task(required_send_database):
             time.sleep(5)
             dust_data = {
                 'um01': int(random.uniform(0, ucl_limit * 1.5)),
+                'um02': int(random.uniform(0, ucl_limit * 1.5)),
                 'um03': int(random.uniform(0, ucl_limit * 1.5)),
                 'um05': int(random.uniform(0, ucl_limit * 1.5)),
                 'um10': int(random.uniform(0, ucl_limit * 1.5)),
