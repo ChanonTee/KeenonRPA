@@ -18,7 +18,7 @@ class Robot:
         self.lock = threading.Lock()
 
 
-    def start_server(self):
+    def __start_server(self):
         """Start the TCP server"""
         self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -26,6 +26,9 @@ class Robot:
         self.server_socket.listen(1)
         print(f"Server listening on {self.server_bind}:{self.server_port}")
 
+        self.__heartbeat()
+            
+    def __heartbeat(self):
         while True:
             # Wait for a client to connect
             if self.client_socket is None:
@@ -34,35 +37,37 @@ class Robot:
                 print(f"Connected to Android device at {addr}")
             else:
                 # Check if the client is still connected
-                with self.lock:
-                    if not self.is_client_connected():
-                        print("Client disconnected, waiting for reconnect...")
-                        self.cleanup_client()
+                if not self.is_client_connected():
+                    print("Client disconnected, waiting for reconnect...")
+                    self.cleanup_client()
                         
-            time.sleep(10)  # avoid busy loop
+            time.sleep(10) # Hearthbeat time
+        
             
     def start_server_in_background(self):
         """Start the TCP server in a new thread"""
-        thread = threading.Thread(target=self.start_server, daemon=True)
+        thread = threading.Thread(target=self.__start_server, daemon=True)
         thread.start()
 
 
     def is_client_connected(self):
-        """Check if the client is still connected (non-blocking)"""
+        """Check if the client is still connected"""
         try:
-            response = self.send_command("ping") 
-            if response.strip() == "pong":
-                #print("Client is still connected.")
-                return True
-            #print("Client is not responding to ping.")
-            return False
-        
+            with self.lock:
+                self.client_socket.sendall(('ping' + '\n').encode())
+                response = self.client_socket.recv(1024).decode('utf-8')
+                if response.strip() == "pong":
+                    #print("Client is still connected.")
+                    return True
+                #print("Client is not responding to ping.")
+                return False
         except (socket.error, socket.timeout):
             #print("Client is not connected.")
             return False
         except Exception as e:
             #print(f"Unexpected error: {e}")
-            return False
+            return False    
+       
         
     def cleanup_client(self):
         """Close and reset client socket"""
@@ -93,28 +98,26 @@ class Robot:
     def send_command(self, command):
         """Send command to the Android device and receive response"""
         try:
-            if command == "ping":
-                self.client_socket.sendall((command + '\n').encode())
-                response = self.client_socket.recv(1024).decode('utf-8')
-                if not response:
-                    print("No response received.")
-                return response
-
+            while not self.is_client_connected():
+                print("Robot is not connected waiting for reconnect")
+                self.cleanup_client()
+                time.sleep(12)
+                
             if command == "getFullUI":  # Handle large responses
                 print(f"Sending command: {command}")
-                self.client_socket.sendall((command + '\n').encode())
-
-                print("Waiting for full response...")
-                response = self.receive_large_response()
+                with self.lock:
+                    self.client_socket.sendall((command + '\n').encode())
+                    print("Waiting for full response...")
+                    response = self.receive_large_response()
                 print("Full Response Received:\n")
                 time.sleep(2)
                 return response
 
             # Handle regular commands
             print(f"Sending command: {command}")
-            self.client_socket.sendall((command + '\n').encode())
-
-            response = self.client_socket.recv(1024).decode('utf-8')
+            with self.lock:
+                self.client_socket.sendall((command + '\n').encode())
+                response = self.client_socket.recv(1024).decode('utf-8')
             if not response:
                 print("No response received.")
             print("Response:", response)
@@ -123,6 +126,8 @@ class Robot:
 
         except Exception as e:
             print(f"Error handling client: {e}")
+            return None
+
 
     def is_have_ui(self, ui: str) -> bool:
         """Check if a specific UI element is present on the screen"""

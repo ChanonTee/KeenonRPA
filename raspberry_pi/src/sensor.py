@@ -39,6 +39,8 @@ class Sensor:
         except Exception as e:
             print(f"Unexpected error during connection: {e}")
             return False
+        finally:
+            self.client.close()
 
     def start_measurement(self):
         """
@@ -78,6 +80,8 @@ class Sensor:
             print(f"Modbus IO Error during stop measurement: {e}")
         except Exception as e:
             print(f"Stop measurement error: {e}")
+        finally:
+            self.client.close()
 
     def read_data(self):
         """
@@ -125,5 +129,7 @@ class Sensor:
         except Exception as e:
             print(f"Error reading data: {e}")
             return None
+        finally:
+            self.client.close()
         
 

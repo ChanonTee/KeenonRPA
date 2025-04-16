@@ -38,8 +38,6 @@ sensor = Sensor()
 db = Database()
 logger = DustLogger()
 
-
-
 # Start the robot server
 robot.start_server_in_background()
 
@@ -131,7 +129,8 @@ async def add_points(data: ListPointsRequest):
     **Response**:
     - A message indicating the points that were added and The current list of destination points.
     """
-    points.extend(data.points) 
+    with lock:
+        points.extend(data.points)
     print(f"Added {data.points} to the queue.")
     return JSONResponse(
                 content={"message": f"Added {data.points} to the queue.", "points": points},
@@ -170,20 +169,71 @@ async def del_points():
                 status_code=200 
             )
     
-  
-"""
-    Dust measurement mode
-"""
+
+def save_activity_log_safe(activity):
+    try:
+        db.save_activity_log(activity)
+        print(f"Saved activity log at {activity[1]}")
+    except Exception as e:
+        activity_buffer.append(activity)
+        print(f"Database error: {e}. Storing offline.")
+
+
+def save_measurement_safe(dust_data):
+    tuple_dust_data = tuple(dust_data.values())
+    try:
+        db.save_measurement(tuple_dust_data)
+        print(f"Saved dust data at {dust_data['location_name']}")
+    except Exception as e:
+        dust_data_buffer.append(tuple_dust_data)
+        print(f"DB error: {e}")
+
+    try:
+        logger.save_measurement_log(dust_data)
+    except Exception as e:
+        print(f"Log error: {e}")
+
+
+def perform_dust_measurement(point, required_send_database):
+    for count in range(1, max_retries + 1):
+        print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
+        
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Measuring start {count}/{max_retries}]"))
+        
+        try:
+            sensor.start_measurement()
+            dust_data = sensor.read_data()
+        except Exception as e:
+            print(f"Sensor error: {e}")
+            continue
+
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Measuring finish {count}/{max_retries}]"))
+
+        dust_data['location_name'] = point
+        dust_data['count'] = count
+        um03 = dust_data.get('um03', 0)
+
+        if um03 > ucl_limit:
+            dust_data['alarm_high'] = 1
+            save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, "Result NG"))
+            print(f"Dust level at {point} exceeded UCL ({um03}). Retrying ...")
+        else:
+            dust_data['alarm_high'] = 0
+            save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, "Result OK"))
+
+        print(dust_data)
+
+        if required_send_database:
+            save_measurement_safe(dust_data)
+            save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Save data to database"))
+        
+        if um03 <= ucl_limit:
+            break
+
+        time.sleep(2)
+
 
 def start_dust_task(required_send_database):
-    """
-    Task to move the robot through all points in the queue and perform measurements.
-
-    This function will:
-    - Move the robot to each point in the queue.
-    - Perform a dust level measurement at each point.
-    - Retry the measurement if the dust level exceeds the UCL (User Control Limit).
-    """
     global stop_event, points, dust_data_buffer, activity_buffer
 
     if not points:
@@ -193,125 +243,67 @@ def start_dust_task(required_send_database):
     robot.send_command("goHome")
     time.sleep(1)
     robot.send_command("Peanut Food Delivery")
-    time.sleep(3)
-
+    time.sleep(2)
 
     while points:
         if stop_event.is_set():
             print("Interrupted: Stopping robot process...")
             return
 
-        point = points.pop(0)  # Run in queue FIFO
+        with lock:
+            point = points.pop(0)
+
         robot.send_command("clickBackButton")
         robot.send_command("Direct")
-        
+
         if not robot.search_ui_and_click(point):
-            print(f"No point found skip {point}")
+            print(f"No point found, skip {point}")
             continue
-        
+
         if stop_event.is_set():
             print("Interrupted: Stopping robot process...")
             return
-        
+
         robot.send_command("Go")
         print(f"Robot is going to {point}...")
-        
-        activity = (datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Going to [{point}]")
-        try:
-            db.save_activity_log(activity)
-            print(f"Saved activity log at {point}")
-        except Exception as e:
-            activity_buffer.append(activity)
-            print(f"Database error: {e}. Storing offline.")
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Going to [{point}]"))
 
-        time.sleep(1)
         now_sec = 0
         while not robot.is_have_ui("Go"):
-            
             if stop_event.is_set():
-                print("Interrupted: Stopping robot process")
+                print("Interrupted: Stopping robot process...")
                 return
-            
             time.sleep(1)
             now_sec += 1
             print(f"Waiting {now_sec}/{max_wait}")
-            
             if now_sec >= max_wait:
                 print("Timeout")
                 break
-            
+
         print(f"Robot at point: {point}")
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Robot at [{point}]"))
 
-
-        # Dust measurement
-        count = 1
-        um01 = None
-        while count < max_retries + 1:
-            print(f"Start measurement at point: {point} count: {count}/{max_retries}...")
-            dust_data = {}
-
-            sensor.start_measurement()
-            dust_data = sensor.read_data()
-
-            #  data = {
-            #     'measurement_datetime': datetime.date.today(),
-            #     'room': 'CR11',
-            #     'area': '1K',
-            #     #'location_name': 'location', 
-            #     #'count': count,# Add in loop
-            #     'um01': response.registers[9],
-            #     'um03': response.registers[17],
-            #     'um05': response.registers[19],
-            #     'running_state': 1,
-            #     #'alarm_high': 0,
-            # }
-
-            dust_data['location_name'] = point
-            dust_data['count'] = count
-            um03 = dust_data['um03']
-
-            if um03 > ucl_limit:
-                dust_data['alarm_high'] = 1
-            else:
-                dust_data['alarm_high'] = 0
-
-            print(dust_data)
-
-            if not required_send_database:
-                print("Not required to send data to database.")
-                continue
-            
-            try:
-                tuple_dust_data = tuple(dust_data.values())
-                db.save_measurement(tuple_dust_data)
-                print(f"Saved measurement at {dust_data['location_name']}, count: {dust_data['count']}")
-                
-                logger.save_measurement_log(dust_data)
-
-            except Exception as e:
-                print(f"Database error: {e}. Storing offline.")
-                dust_data_buffer.append(tuple_dust_data)
-
-            if um03 > ucl_limit:
-                print(f"Dust level at {dust_data['location_name']} exceeded UCL ({um01}). Retrying ...")
-            else:
-                break
-
-            count += 1
-            time.sleep(2)
-
+        perform_dust_measurement(point, required_send_database)
         print(f"Finished point: {point}")
 
     if dust_data_buffer:
         print("Retrying to save measurements...")
         try:
-            db.save_measurement(dust_data)
-            print(f"Recovered and saved {dust_data['location_name']}, count: {dust_data['count']}")
+            db.save_measurement(dust_data_buffer)
             dust_data_buffer.clear()
         except Exception as e:
-            print(f"Still unable to save {point}: {e}")
+            print(f"Still unable to save measurements: {e}")
+
+    if activity_buffer:
+        print("Retrying to save activity logs...")
+        try:
+            db.save_activity_log(activity_buffer)
+            activity_buffer.clear()
+        except Exception as e:
+            print(f"Still unable to save activity logs: {e}")
 
     print("All measurements completed.")
+
 
 class OperationRequest(BaseModel):
     required_send_database: bool
@@ -391,9 +383,6 @@ async def stop_dust():
                 status_code=200 
             )
 
-"""
-    Transportation mode
-"""
 
 def start_transportation_task():
     """
@@ -401,49 +390,58 @@ def start_transportation_task():
         This function will:
         
     """
-    
+    global stop_event, points, activity_buffer
+
+    if not points:
+        print("No points in queue.")
+        return
+
     robot.send_command("goHome")
     time.sleep(1)
     robot.send_command("Peanut Food Delivery")
-    time.sleep(3)
+    time.sleep(2)
 
+    if stop_event.is_set():
+        print("Interrupted: Stopping robot process...")
+        return
 
+    robot.send_command("clickBackButton")
+    robot.send_command("Direct")
+
+    for point in points:
+        with lock:
+            if not robot.search_ui_and_click(point):
+                print(f"No point found, skip {point}")
+                continue
+
+    if stop_event.is_set():
+        print("Interrupted: Stopping robot process...")
+        return
+
+    robot.send_command("Go")
+    
     while points:
-        if stop_event.is_set():
-            print("Interrupted: Stopping robot process...")
-            return
-
-        point = points.pop(0)  # Run in queue FIFO
-        robot.send_command("clickBackButton")
-        robot.send_command("Direct")
-        
-        if not robot.search_ui_and_click(point):
-            print(f"No point found skip {point}")
-            continue
-        
-        if stop_event.is_set():
-            print("Interrupted: Stopping robot process...")
-            return
-        
-        robot.send_command("Go")
-        time.sleep(1)
+        point = points.pop(0)
+        print(f"Robot is going to {point}...")
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Going to [{point}]"))
 
         now_sec = 0
-        while not robot.is_have_ui("Go"):
-            
+        while not robot.is_have_ui("OK"):
             if stop_event.is_set():
-                print("Interrupted: Stopping robot process")
+                print("Interrupted: Stopping robot process...")
                 return
-            
             time.sleep(1)
             now_sec += 1
             print(f"Waiting {now_sec}/{max_wait}")
-            
             if now_sec >= max_wait:
                 print("Timeout")
                 break
-            
+
         print(f"Robot at point: {point}")
+        save_activity_log_safe((datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), point, f"Robot at [{point}]"))
+        
+        while robot.is_have_ui("OK"):
+            time.sleep(1)
 
 
 @app.post("/start-transportation")

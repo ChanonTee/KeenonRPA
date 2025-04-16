@@ -59,24 +59,17 @@ class Database:
         if self.conn:
             self.conn.close()
             
-
-    def save_measurement(self, data):
+    def __save_to_database(self, data, query):
         # Insert measurement data into the DustMeasurements table
         try:
             self.__connect()
 
-            query = """
-                INSERT INTO DustMeasurements 
-                (measurement_datetime, room, area, location_name, count, um01, um02, um03, um05, um07, um10, running_state, alarm_high) 
-                VALUES (%s, %s, %s, %s, %d, %d, %d, %d, %d, %d, %d, %d, %d)
-                """
-
             # Check if data is a list of tuples or a single tuple
             if isinstance(data, list):
-                if len(data) > 0 and isinstance(data[0], tuple):  # Multiple rows (list of tuples)
+                if all(isinstance(row, tuple) for row in data):  # Multiple rows (list of tuples)
                     self.cursor.executemany(query, data)
                 else:
-                    print("Data format is not correct for a list of tuples.")
+                    print("Each item in data list must be a tuple.")
                     return
             elif isinstance(data, tuple):  # Single row (single tuple)
                 self.cursor.execute(query, data)
@@ -85,45 +78,29 @@ class Database:
                 return
 
             self.conn.commit()
-            print("Dust data inserted successfully!")
+            print("Data inserted successfully!")
         except pymssql.Error as e:
             print(f"Database error: {e}")
         except Exception as e:
             print(f"Unexpected error: {e}")
         finally:
             self.__close()
+            
+
+    def save_measurement(self, data):
+        # Insert measurement data into the DustMeasurements table
+        query = """
+            INSERT INTO DustMeasurements 
+            (measurement_datetime, room, area, location_name, count, um01, um02, um03, um05, um07, um10, running_state, alarm_high) 
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """
+        self.__save_to_database(data, query)
     
     def save_activity_log(self, data):
         # Insert activity log data into the ActivityLog table
-        try:
-            self.__connect()
-
-            query = """
-                INSERT INTO ActivityLog 
-                (timestamp, location_name, activity) 
-                VALUES (%s, %s, %s)
-                """
-        
-            # Check if data is a list of tuples or a single tuple
-            if isinstance(data, list):
-                if len(data) > 0 and isinstance(data[0], tuple):  # Multiple rows (list of tuples)
-                    self.cursor.executemany(query, data)
-                else:
-                    print("Data format is not correct for a list of tuples.")
-                    return
-            elif isinstance(data, tuple):  # Single row (single tuple)
-                self.cursor.execute(query, data)
-            else:
-                print("Data format is not correct.")
-                return
-
-            self.conn.commit()
-            print("Activity log inserted successfully!")
-        except pymssql.Error as e:
-            print(f"Database error: {e}")
-        except Exception as e:
-            print(f"Unexpected error: {e}")
-        finally:
-            self.__close()
-
-   
+        query = """
+            INSERT INTO ActivityLog 
+            (timestamp, location_name, activity) 
+            VALUES (%s, %s, %s)
+            """
+        self.__save_to_database(data, query)
