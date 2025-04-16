@@ -97,9 +97,9 @@ class Database:
         self.__save_to_database(data, query)
     
     def save_activity_log(self, data):
-        # Insert activity log data into the ActivityLog table
+        # Insert activity log data into the ActivityLogs table
         query = """
-            INSERT INTO ActivityLog 
+            INSERT INTO ActivityLogs 
             (timestamp, location_name, activity) 
             VALUES (%s, %s, %s)
             """
